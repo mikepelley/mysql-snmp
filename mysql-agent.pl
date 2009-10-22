@@ -41,32 +41,32 @@ netsnmp_ds_set_boolean(NETSNMP_DS_APPLICATION_ID,
 my $agent = new NetSNMP::agent('Name' => 'mysql', 'AgentX' => 1);
 
 
-my $VERSION = "0.6";
+my $VERSION = "0.7";
 my %opt = ();
 
 sub usage
 {
 	print "usage: mysql-agent.pl [*options*]\n\n";
-	print "	 --help				display this help and exit\n";
-	print "	 -v, --verbose		be verbose about what you do\n";
-	print "	 -V, --version		output version information and exit\n";
-	print "	 --daemon-pid=FILE	write PID to FILE instead of /var/run/mysql-agent.pid\n";
-	print "	 -u DBUSER			use DBUSER as user to connect to mysql\n";
-	print "	 -p DBPASS			use DBPASS as password to connect to mysql\n";
-	print "	 -h|--host HOST		connect to HOST\n";
-	print "	 -P|--port PORT		port to connect (default 3306)\n";
-	print "	 -m|--master		check master\n";
-	print "	 -s|--slave			check slave\n";
-	print "	 --oid OID			registering OID\n";
-	print "	 -i|--refresh		refresh interval in seconds\n";
-	print "	 \n";
+	print "  --help                display this help and exit\n";
+	print "  -v, --verbose         be verbose about what you do\n";
+	print "  -V, --version         output version information and exit\n";
+	print "  --daemon-pid=FILE     write PID to FILE instead of /var/run/mysql-agent.pid\n";
+	print "  -u|--user DBUSER      use DBUSER as user to connect to mysql\n";
+	print "  -p|--password DBPASS  use DBPASS as password to connect to mysql\n";
+	print "  -h|--host HOST        connect to HOST\n";
+	print "  -P|--port PORT        port to connect (default 3306)\n";
+	print "  -m|--master           check master\n";
+	print "  -s|--slave            check slave\n";
+	print "  --oid OID             registering OID\n";
+	print "  -i|--refresh          refresh interval in seconds\n";
+	print "  \n";
 	exit;
 }
 
 Getopt::Long::Configure('no_ignore_case');
 GetOptions(\%opt, 'help', 'version|V',
 	'verbose|v+', 'u|user=s','p|password=s','h|host=s','P|port=i','no-daemon',
-	'master|m','slave|s', 'oid', 'i|refresh=i', 'daemon_pid|daemon-pid=s',
+	'm|master','s|slave', 'oid', 'i|refresh=i', 'daemon_pid|daemon-pid=s',
 	) or exit(1);
 
 usage() if $opt{help};
@@ -84,9 +84,9 @@ my $port = $opt{P} || '3306';
 my $debugging = $opt{verbose};
 my $daemon_pidfile = $opt{'daemon-pid'} || '/var/run/mysql-agent.pid';
 my $subagent  = 0;
-my $chk_innodb = 1;	   # Do you want to check InnoDB statistics?
-my $chk_master = 1;	   # Do you want to check binary logging?
-my $chk_slave  = 0;	   # Do you want to check slave status?
+my $chk_innodb = 1;		# Cannot be disabled (todo)
+my $chk_master = $opt{m} || 0;	# Do you want to check binary logging?
+my $chk_slave  = $opt{s} || 0;	# Do you want to check slave status?
 my $refresh_interval	= $opt{i} || 300;
  
 my $dsn	 = "DBI:mysql:host=${host};port=${port}";
@@ -556,14 +556,15 @@ sub fetch_mysql_data
 
 		if ( $chk_slave ) 
 		{
-			$result = $dbh->selectall_arrayref("SHOW SLAVE STATUS");
+			$result = $dbh->selectall_arrayref("SHOW SLAVE STATUS", { Slice => {} });
+
 			foreach my $row (@$result)
 			{
 				# Must lowercase keys because different versions have different
 				# lettercase.
-				$row = map { lc($_) => $row->{$_} } keys %$row;
-				$status{'relay_log_space'}	= $row->{'relay_log_space'};
-				$status{'slave_lag'}		= $row->{'seconds_behind_master'};
+				my %newrow = map { lc($_) => $row->{$_} } keys %$row;
+				$status{'relay_log_space'}	= $newrow{'relay_log_space'};
+				$status{'slave_lag'}		= $newrow{'seconds_behind_master'};
 
 				# Check replication heartbeat, if present.
 				# if ( $hb_table ) {
@@ -574,9 +575,8 @@ sub fetch_mysql_data
 				#	 $status{'slave_lag'} = $row2[0];
 				# }
 
-				# Scale slave_running and slave_stopped relative to the slave lag.
-				$status{'slave_running'} = ($row->{'slave_sql_running'} == 'Yes') ? $status{'slave_lag'} : 0;
-				$status{'slave_stopped'} = ($row->{'slave_sql_running'} == 'Yes') ? 0 : $status{'slave_lag'};
+				$status{'slave_running'} = ($newrow{'slave_sql_running'} eq 'Yes') ? 1 : 0;
+				$status{'slave_stopped'} = ($newrow{'slave_sql_running'} eq 'Yes') ? 0 : 1;
 			}
 		}
 
